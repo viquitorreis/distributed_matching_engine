@@ -1,18 +1,22 @@
 package raft
 
-import "sync"
+import (
+	"sync"
+)
 
 // Raft is pure state machine, doesn't know nothing about the network, socket or the orderbook itself.
 // It only knows: term, state (Follower/Candidate/Leader), who voted in who,
 // and the rules of transition between states
 type Raft struct {
-	state       NodeState
-	currentTerm uint64
-	votedFor    string // resets on each new term
-	leaderID    string // who this nodes recognizes as the actual leader, "" if doesnt know
-	totalNodes  uint64 // cluster size (including this own node), to calculate quorum
+	state         NodeState
+	currentTerm   uint64
+	votedFor      string // resets on each new term
+	leaderID      string // who this nodes recognizes as the actual leader, "" if doesnt know
+	totalNodes    uint64 // cluster size (including this own node), to calculate quorum
+	logs          []*LogEntry
+	lastLoggedIdx uint64 // separate field, because its cheaper than calculate len(logs) each time
 
-	mu sync.Mutex
+	mu sync.RWMutex
 }
 
 func NewRaft(totalNodes uint64) *Raft {
@@ -123,4 +127,62 @@ func (r *Raft) StepDown(term uint64) {
 	}
 
 	r.state = Follower
+}
+
+// AppendAsLeader append logs guaranteeing that only leaders will do
+func (r *Raft) AppendAsLeader(d []byte) (index, term uint64, ok bool) {
+	if !r.IsLeader() {
+		return 0, 0, false
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	idx := r.lastLoggedIdx + 1 // logs start at index 1 on raft, not 0
+	entry := &LogEntry{
+		Index: idx,
+		Term:  r.currentTerm,
+		Data:  d,
+	}
+	r.logs = append(r.logs, entry)
+	r.lastLoggedIdx = idx
+
+	return idx, entry.Term, true
+}
+
+func (r *Raft) GetLastLoggedIdx() uint64 {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return r.lastLoggedIdx
+}
+
+// AppendAsFollower records a log entry replicated from the current
+// leader. Unlike AppendAsLeader, index and term come from the sender
+// this node doesn't generate them, only validates and stores.
+func (r *Raft) AppendAsFollower(index, term uint64, data []byte) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if term < r.currentTerm {
+		// state leader trying to replicate an old term, reject
+		return false
+	}
+
+	if term > r.currentTerm {
+		r.currentTerm = term
+		r.votedFor = ""
+		r.state = Follower
+	}
+
+	// Today: trust the leaders index directly, no gap/consistency
+	// check yet (real Raft verifies the previous entry matches before
+	// accepting that's the AppendEntries consistency check, future
+	// work).
+	r.logs = append(r.logs, &LogEntry{Index: index, Term: term, Data: data})
+	if index > r.lastLoggedIdx {
+		r.lastLoggedIdx = index
+	}
+
+	return true
 }

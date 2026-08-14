@@ -2,13 +2,12 @@ package cluster
 
 import (
 	"context"
-	"fmt"
+	"encoding/binary"
 	"log/slog"
 	"raft_orderbook/orderbook"
 	"raft_orderbook/peer"
 	"raft_orderbook/raft"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -23,7 +22,6 @@ type Cluster struct {
 	propose chan []byte          // local ask to propose a write on the cluster
 
 	PendingProposals *raft.PendingProposals
-	proposalCounter  atomic.Uint64
 	ownAddr          string // needs to know its own address to create the ID
 
 	ob   *orderbook.OrderBook
@@ -117,20 +115,26 @@ func (b *Cluster) UnregPeer(p *peer.Peer) {
 func (c *Cluster) handleInboundMsg(m peer.InboundMsg) {
 	switch m.Type {
 	case peer.MsgWriteProposal:
-		id, op, err := decodeProposal(m.Body) // extrai ID + operação do payload
+		idx, term, op, err := decodeProposal(m.Body) // extrai ID + operação do payload
 		if err != nil {
 			slog.Error("malformed proposal", "error", err, "from", m.From.Addr)
 
 			return
 		}
 
+		if !c.raft.AppendAsFollower(idx, term, op) {
+			slog.Warn("rejected proposal from stale term", "index", idx, "term", term, "from", m.From.Addr)
+			return // dont ack stale leader
+		}
+
 		// receiving side now DOES track it, so it has the operation
 		// ready when the commit message arrives later
-		c.PendingProposals.Register(id, op)
-		m.From.Send(peer.MsgWriteAck, []byte(id)) // ack now references the real id
+		c.PendingProposals.Register(idx, op)
+
+		m.From.Send(peer.MsgWriteAck, encodeAckBody(idx)) // ack now references the real id
 
 	case peer.MsgWriteAck:
-		id := string(m.Body)
+		id := binary.BigEndian.Uint64(m.Body)
 
 		_, exists := c.PendingProposals.RecordVote(id, m.From.Addr)
 		if !exists {
@@ -142,7 +146,7 @@ func (c *Cluster) handleInboundMsg(m peer.InboundMsg) {
 		c.maybeCommit(id)
 
 	case peer.MsgCommit:
-		id := string(m.Body)
+		id := binary.BigEndian.Uint64(m.Body)
 		c.applyCommitted(id) // new: apply locally, same logic maybeCommit used to inline
 
 	case peer.MsgHeartbeat:
@@ -224,19 +228,21 @@ func (c *Cluster) Register(p *peer.Peer) {
 // Propose originates a new write proposal from THIS node. Generates a
 // unique ID, tracks it as pending, broadcasts to every peer, and counts this node's
 // own implicit vote immediately (it doesnt need to ack itself over the network)
-func (c *Cluster) Propose(op []byte) string {
-	counter := c.proposalCounter.Add(1)
-	id := fmt.Sprintf("%s:%d", c.ownAddr, counter)
+func (c *Cluster) Propose(op []byte) (uint64, bool) {
+	logIdx, term, ok := c.raft.AppendAsLeader(op)
+	if !ok {
+		return 0, false
+	}
 
-	c.PendingProposals.Register(id, op)
+	c.PendingProposals.Register(logIdx, op)
 	// count our own vote right away, quorum counts us as 1 without
 	// needing a round-trip ack to ourselves
-	c.PendingProposals.RecordVote(id, c.ownAddr)
+	c.PendingProposals.RecordVote(logIdx, c.ownAddr)
 
-	payload, err := encodeProposal(id, op)
+	payload, err := encodeProposal(logIdx, term, op)
 	if err != nil {
 		slog.Error("failed to encode proposal", "error", err)
-		return "" // err signaling??
+		return 0, false // err signaling??
 	}
 
 	c.mu.RLock()
@@ -245,36 +251,39 @@ func (c *Cluster) Propose(op []byte) string {
 	}
 	c.mu.RUnlock()
 
-	c.maybeCommit(id) // in case it reached quorum with only its own vote (cluster with only 1 node)
+	c.maybeCommit(logIdx) // in case it reached quorum with only its own vote (cluster with only 1 node)
 
-	return id
+	return logIdx, true
 }
 
 // maybeCommit checks where a proposal has reached quorum, and if so,
 // applies it to the local order book and stops tracking it
-func (c *Cluster) maybeCommit(id string) {
+func (c *Cluster) maybeCommit(entryIdx uint64) {
 	c.mu.RLock()
 	quorum := (len(c.peers)+1)/2 + 1 // +1 counting this node on total this clusters have
 	c.mu.RUnlock()
 
 	// we need to expose this actual vote without incrementing the new one, adjust in
-	// PendingProposals: a read only method, like VoteCount(id)
-	votes := c.PendingProposals.VoteCount(id)
+	// PendingProposals: a read only method, like VoteCount(entryIdx)
+	votes := c.PendingProposals.VoteCount(entryIdx)
 	if votes < quorum {
 		return
 	}
 
+	buf := make([]byte, 8)
+	binary.BigEndian.PutUint64(buf, entryIdx)
+
 	// quorum reached broadcast commit so every peer applies too
 	c.mu.RLock()
 	for _, p := range c.peers {
-		p.Send(peer.MsgCommit, []byte(id))
+		p.Send(peer.MsgCommit, buf)
 	}
 	c.mu.RUnlock()
 
-	c.applyCommitted(id) // apply on the proposer itself too
+	c.applyCommitted(entryIdx) // apply on the proposer itself too
 }
 
-func (c *Cluster) applyCommitted(id string) {
+func (c *Cluster) applyCommitted(id uint64) {
 	pp := c.PendingProposals.Get(id)
 	if pp == nil {
 		return // already applied, or this node never tracked it

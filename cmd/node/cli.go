@@ -52,8 +52,11 @@ func startCLI(cl *cluster.Cluster) {
 				continue
 			}
 
-			id := cl.Propose(payload)
-			fmt.Printf("proposed order %s, proposal id %s\n", order.ID, id)
+			id, ok := cl.Propose(payload)
+			if !ok {
+				slog.Warn("failed to propose order", "id", id)
+			}
+			fmt.Printf("proposed order %s, proposal id %d\n", order.ID, id)
 
 		case "cancel":
 			if len(fields) != 2 {
@@ -68,8 +71,11 @@ func startCLI(cl *cluster.Cluster) {
 				continue
 			}
 
-			id := cl.Propose(payload)
-			fmt.Printf("proposed cancel %s, proposal id %s\n", fields[1], id)
+			id, ok := cl.Propose(payload)
+			if !ok {
+				slog.Warn("failed to propose order", "id", id)
+			}
+			fmt.Printf("proposed cancel %s, proposal id %d\n", fields[1], id)
 
 		case "list":
 

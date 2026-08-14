@@ -9,7 +9,7 @@ import (
 // from the moment a WriteProposal is sent (or received) until either
 // enough WriteAcks arrive to commit it, or it times out.
 type PendingProposal struct {
-	ID        string              // "nodeAddr:counter", unique across the cluster
+	ID        uint64              // "nodeAddr:counter", unique across the cluster
 	Operation []byte              // the serialized order book operation itself
 	Voters    map[string]struct{} // which peer identities have acked (set, not count)
 	CreatedAt time.Time           // for timeout sweeping
@@ -19,31 +19,31 @@ type PendingProposal struct {
 // Separate type (not just a field on Cluster) because it has its
 // ownb concurrency rules distinct from the peers map.
 type PendingProposals struct {
-	items map[string]*PendingProposal
+	items map[uint64]*PendingProposal
 	mu    sync.Mutex
 }
 
 func NewPendingProposals() *PendingProposals {
 	return &PendingProposals{
-		items: make(map[string]*PendingProposal),
+		items: make(map[uint64]*PendingProposal),
 	}
 }
 
 // Register registers a new proposal. Called both when THIS node originates
 // a proposal, and is a no-op path for proposals received from others
 // (they dont need pending-tracking on the receiving side)
-func (p *PendingProposals) Register(id string, op []byte) *PendingProposal {
+func (p *PendingProposals) Register(entry uint64, op []byte) *PendingProposal {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	pp := &PendingProposal{
-		ID:        id,
+		ID:        entry,
 		Operation: op,
 		Voters:    make(map[string]struct{}),
 		CreatedAt: time.Now(),
 	}
 
-	p.items[id] = pp
+	p.items[entry] = pp
 
 	return pp
 }
@@ -53,7 +53,7 @@ func (p *PendingProposals) Register(id string, op []byte) *PendingProposal {
 // (already committed, already timed out, or ack for a proposal this node never originated),
 // the caller should just ignore the ack. The map naturally gives idempotency: adding the
 // same identity twice doesn't increase len(Voters).
-func (p *PendingProposals) RecordVote(id, voterIdentity string) (votes int, exists bool) {
+func (p *PendingProposals) RecordVote(id uint64, voterIdentity string) (votes int, exists bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	pp, ok := p.items[id]
@@ -68,7 +68,7 @@ func (p *PendingProposals) RecordVote(id, voterIdentity string) (votes int, exis
 
 // Remove takes a proposal out of tracking, its called both on successful commit
 // (quorum reached) and on timeout (gave up waiting)
-func (p *PendingProposals) Remove(id string) {
+func (p *PendingProposals) Remove(id uint64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	delete(p.items, id)
@@ -76,11 +76,11 @@ func (p *PendingProposals) Remove(id string) {
 
 // SweepExpired returns IDs of proposals older than maxAge, for the
 // timeout goroutine to log and remove.
-func (p *PendingProposals) SweepExpired(maxAge time.Duration) []string {
+func (p *PendingProposals) SweepExpired(maxAge time.Duration) []uint64 {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	var expired []string
+	var expired []uint64
 	for id, pp := range p.items {
 		if time.Since(pp.CreatedAt) > maxAge {
 			expired = append(expired, id)
@@ -90,7 +90,7 @@ func (p *PendingProposals) SweepExpired(maxAge time.Duration) []string {
 	return expired
 }
 
-func (p *PendingProposals) VoteCount(id string) int {
+func (p *PendingProposals) VoteCount(id uint64) int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -102,7 +102,7 @@ func (p *PendingProposals) VoteCount(id string) int {
 	return len(pp.Voters)
 }
 
-func (p *PendingProposals) Get(id string) *PendingProposal {
+func (p *PendingProposals) Get(id uint64) *PendingProposal {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 

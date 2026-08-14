@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/gob"
 	"fmt"
 )
@@ -79,4 +80,10 @@ func decodeLeaderHeartbeat(b []byte) (term uint64, leaderID string, err error) {
 	}
 
 	return body.Term, body.LeaderID, nil
+}
+
+func encodeAckBody(idx uint64) []byte {
+	buf := make([]byte, 8) // uint64 have 64 bits / 8 = 8 bytes
+	binary.BigEndian.PutUint64(buf, idx)
+	return buf
 }
