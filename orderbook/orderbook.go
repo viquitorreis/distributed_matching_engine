@@ -1,4 +1,4 @@
-package main
+package orderbook
 
 import (
 	"container/list"
@@ -75,7 +75,7 @@ func NewOrder(id, userID string, side Side, price, qty int) *Order {
 }
 
 // AddOrder adds a new order at the correct book
-func (ob *OrderBook) AddOrder(o *Order) {
+func (ob *OrderBook) addOrder(o *Order) {
 	ob.mu.Lock()
 	defer ob.mu.Unlock()
 
@@ -184,7 +184,7 @@ func (ob *OrderBook) Match() []Trade {
 	return res
 }
 
-func (ob *OrderBook) Cancel(orderID string) bool {
+func (ob *OrderBook) cancel(orderID string) bool {
 	ob.mu.Lock()
 	defer ob.mu.Unlock()
 
@@ -241,4 +241,39 @@ func (ob *OrderBook) AskDepth() int {
 	ob.mu.RUnlock()
 
 	return count
+}
+
+func (ob *OrderBook) AllOrders() []Order {
+	ob.mu.RLock()
+	defer ob.mu.RUnlock()
+
+	out := []Order{}
+
+	for _, level := range ob.bidsIndex.All() {
+		for e := level.Orders.Front(); e != nil; e = e.Next() {
+			o := e.Value.(*Order)
+
+			out = append(out, Order{
+				ID:       o.ID,
+				Side:     o.Side,
+				Price:    o.Price,
+				Quantity: o.Quantity,
+			})
+		}
+	}
+
+	for _, level := range ob.asksIndex.All() {
+		for e := level.Orders.Front(); e != nil; e = e.Next() {
+			o := e.Value.(*Order)
+
+			out = append(out, Order{
+				ID:       o.ID,
+				Side:     o.Side,
+				Price:    o.Price,
+				Quantity: o.Quantity,
+			})
+		}
+	}
+
+	return out
 }

@@ -1,4 +1,4 @@
-package main
+package orderbook
 
 import (
 	"fmt"
@@ -10,8 +10,8 @@ import (
 
 func TestAddAndMatch(t *testing.T) {
 	ob := NewOrderBook("BTC-USD")
-	ob.AddOrder(NewOrder("b1", "alice", Bid, 103, 5))
-	ob.AddOrder(NewOrder("a1", "bob", Ask, 103, 3))
+	ob.addOrder(NewOrder("b1", "alice", Bid, 103, 5))
+	ob.addOrder(NewOrder("a1", "bob", Ask, 103, 3))
 
 	trades := ob.Match()
 	assert.Len(t, trades, 1)
@@ -22,8 +22,8 @@ func TestAddAndMatch(t *testing.T) {
 
 func TestNoMatch(t *testing.T) {
 	ob := NewOrderBook("BTC-USD")
-	ob.AddOrder(NewOrder("b1", "alice", Bid, 100, 5))
-	ob.AddOrder(NewOrder("a1", "bob", Ask, 105, 3))
+	ob.addOrder(NewOrder("b1", "alice", Bid, 100, 5))
+	ob.addOrder(NewOrder("a1", "bob", Ask, 105, 3))
 
 	trades := ob.Match()
 	assert.Empty(t, trades)
@@ -31,32 +31,32 @@ func TestNoMatch(t *testing.T) {
 
 func TestCancel(t *testing.T) {
 	ob := NewOrderBook("BTC-USD")
-	ob.AddOrder(NewOrder("b1", "alice", Bid, 100, 5))
-	assert.True(t, ob.Cancel("b1"))
+	ob.addOrder(NewOrder("b1", "alice", Bid, 100, 5))
+	assert.True(t, ob.cancel("b1"))
 	assert.Equal(t, 0, ob.BidDepth())
-	assert.False(t, ob.Cancel("b1")) // already removed
+	assert.False(t, ob.cancel("b1")) // already removed
 }
 
 func TestPriceTimePriority(t *testing.T) {
 	ob := NewOrderBook("BTC-USD")
 	// both bids have the same price, but b1 arrived first
-	ob.AddOrder(NewOrder("b1", "alice", Bid, 103, 2))
-	ob.AddOrder(NewOrder("b2", "bob", Bid, 103, 2))
-	ob.AddOrder(NewOrder("a1", "carol", Ask, 103, 2))
+	ob.addOrder(NewOrder("b1", "alice", Bid, 103, 2))
+	ob.addOrder(NewOrder("b2", "bob", Bid, 103, 2))
+	ob.addOrder(NewOrder("a1", "carol", Ask, 103, 2))
 
 	trades := ob.Match()
 	assert.Len(t, trades, 1)
 	assert.Equal(t, "b1", trades[0].BidOrderID) // b1 have priority over b2
 }
 
-func TestConcurrentAddOrders(t *testing.T) {
+func TestConcurrentaddOrders(t *testing.T) {
 	ob := NewOrderBook("BTC-USD")
 	var wg sync.WaitGroup
 	for i := 0; i < 100; i++ {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			ob.AddOrder(NewOrder(
+			ob.addOrder(NewOrder(
 				fmt.Sprintf("b%d", n), "user", Bid, 100+n, 1,
 			))
 		}(i)
@@ -65,8 +65,8 @@ func TestConcurrentAddOrders(t *testing.T) {
 	assert.Equal(t, 100, ob.BidDepth())
 }
 
-// BenchmarkCancelMiddleOfLevel bench test is same scanario from the old (heap)
-// with direct comparison. Here the expectation is O(1) per Cancel, regardless of
+// BenchmarkcancelMiddleOfLevel bench test is same scanario from the old (heap)
+// with direct comparison. Here the expectation is O(1) per cancel, regardless of
 // N, since the doubly linked list allows removing the node from the middle
 // without scanning the rest of the queue.
 func BenchmarkCancelMiddleOfLevel(b *testing.B) {
@@ -83,19 +83,19 @@ func BenchmarkCancelMiddleOfLevel(b *testing.B) {
 				for j := 0; j < n; j++ {
 					id := fmt.Sprintf("o%d", j)
 					ids[j] = id
-					ob.AddOrder(NewOrder(id, "user", Bid, 100, 1))
+					ob.addOrder(NewOrder(id, "user", Bid, 100, 1))
 				}
 				middleID := ids[n/2]
 				b.StartTimer()
 
-				ob.Cancel(middleID)
+				ob.cancel(middleID)
 			}
 		})
 	}
 }
 
-// BenchmarkCancelManyDistinctLevels bench test is same scanario from the old (heap)
-// to direct comparison. Here the expectation is O(log n) per Cancel, not O(n log n),
+// BenchmarkcancelManyDistinctLevels bench test is same scanario from the old (heap)
+// to direct comparison. Here the expectation is O(log n) per cancel, not O(n log n),
 //
 //	since the skip list removes a price level pointwise without reconstructing the entire structure.
 func BenchmarkCancelManyDistinctLevels(b *testing.B) {
@@ -112,12 +112,12 @@ func BenchmarkCancelManyDistinctLevels(b *testing.B) {
 				for j := 0; j < n; j++ {
 					id := fmt.Sprintf("o%d", j)
 					ids[j] = id
-					ob.AddOrder(NewOrder(id, "user", Bid, 100+j, 1))
+					ob.addOrder(NewOrder(id, "user", Bid, 100+j, 1))
 				}
 				b.StartTimer()
 
 				for _, id := range ids {
-					ob.Cancel(id)
+					ob.cancel(id)
 				}
 			}
 		})

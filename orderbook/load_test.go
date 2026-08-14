@@ -1,4 +1,4 @@
-package main
+package orderbook
 
 import (
 	"fmt"
@@ -25,7 +25,7 @@ func TestLoad(t *testing.T) {
 			var idCounter int64
 			for i := 0; i < 1000; i++ {
 				id := fmt.Sprintf("seed-%d", atomic.AddInt64(&idCounter, 1))
-				ob.AddOrder(NewOrder(id, "user", Bid, 100+rand.Intn(50), 1))
+				ob.addOrder(NewOrder(id, "user", Bid, 100+rand.Intn(50), 1))
 			}
 
 			var wg sync.WaitGroup
@@ -47,14 +47,14 @@ func TestLoad(t *testing.T) {
 						switch {
 						case op < 0.70: // cancel
 							id := fmt.Sprintf("seed-%d", r.Intn(1000)+1)
-							ob.Cancel(id)
+							ob.cancel(id)
 						case op < 0.90: // add
 							id := fmt.Sprintf("w-%d", atomic.AddInt64(&idCounter, 1))
 							side := Bid
 							if r.Intn(2) == 0 {
 								side = Ask
 							}
-							ob.AddOrder(NewOrder(id, "user", side, 100+r.Intn(50), 1))
+							ob.addOrder(NewOrder(id, "user", side, 100+r.Intn(50), 1))
 						default: // match
 							ob.Match()
 						}
