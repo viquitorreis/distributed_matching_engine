@@ -8,6 +8,7 @@ import (
 	"raft_orderbook/orderbook"
 	"raft_orderbook/peer"
 	"raft_orderbook/raft"
+	"raft_orderbook/storage"
 	"slices"
 	"testing"
 	"time"
@@ -71,7 +72,7 @@ func TestCluster_RejectsSecondConnectionSameIdentity(t *testing.T) {
 		ctx,
 		"localhost:9002",
 		orderbook.NewOrderBook("BTC-USD"),
-		raft.NewRaft(uint64(2)),
+		raft.NewRaft(uint64(2), storage.NewStorage("9002")),
 	)
 	f := framing.NewFraming(4)
 

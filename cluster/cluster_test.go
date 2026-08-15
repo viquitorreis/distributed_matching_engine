@@ -11,6 +11,7 @@ import (
 	"raft_orderbook/orderbook"
 	"raft_orderbook/peer"
 	"raft_orderbook/raft"
+	"raft_orderbook/storage"
 )
 
 // connectPeers wires two clusters together with an in-memory net.Pipe
@@ -66,7 +67,12 @@ func TestRaftFailover_NewLeaderElectedAfterLeaderDies(t *testing.T) {
 		ctxs[i] = ctx
 		cancels[i] = cancel
 		ob := orderbook.NewOrderBook("BTC-USD")
-		clusters[i] = cluster.NewCluster(ctx, addr, ob, raft.NewRaft(uint64(len(addrs))))
+		clusters[i] = cluster.NewCluster(
+			ctx,
+			addr,
+			ob,
+			raft.NewRaft(uint64(len(addrs)), storage.NewStorage(addr)),
+		)
 	}
 	defer func() {
 		for _, cancel := range cancels {

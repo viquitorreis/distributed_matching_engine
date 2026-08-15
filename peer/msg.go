@@ -11,6 +11,8 @@ const (
 	MsgRequestVote
 	MsgVoteGranted
 	MsgLeaderHeartbeat // only sent by the current leader, carries term
+	MsgSnapshotRequest
+	MsgSnapshotResponse
 )
 
 type InboundMsg struct {

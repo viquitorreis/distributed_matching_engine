@@ -74,11 +74,14 @@ func NewOrder(id, userID string, side Side, price, qty int) *Order {
 	}
 }
 
-// AddOrder adds a new order at the correct book
-func (ob *OrderBook) addOrder(o *Order) {
+func (ob *OrderBook) addOrderLocked(o *Order) {
 	ob.mu.Lock()
 	defer ob.mu.Unlock()
+	ob.addOrder(o)
+}
 
+// AddOrder adds a new order at the correct book
+func (ob *OrderBook) addOrder(o *Order) {
 	switch o.Side {
 	case Bid:
 		var level *PriceLevel

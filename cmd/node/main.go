@@ -12,6 +12,7 @@ import (
 	"raft_orderbook/orderbook"
 	"raft_orderbook/peer"
 	"raft_orderbook/raft"
+	"raft_orderbook/storage"
 	"syscall"
 	"time"
 )
@@ -35,8 +36,8 @@ func main() {
 	// # then on one terminal: "order bid 100 10" and "order ask 100 10" on another one
 	// to cancel just "cancel <order_uuid>""
 	cfg := Config{
-		ListenAddr: os.Getenv("LISTEN_ADDR"), // ex: ":9001"
-		PeerAddrs:  os.Args[1:],              // ex: :9002 :9003
+		ListenAddr: normalizeAddr(os.Getenv("LISTEN_ADDR")), // ex: ":9001"
+		PeerAddrs:  os.Args[1:],                             // ex: :9002 :9003
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -45,14 +46,17 @@ func main() {
 	f := framing.NewFraming(4)
 	ob := orderbook.NewOrderBook("BTC-USD")
 	totalNodes := len(cfg.PeerAddrs) + 1
-	cl := cluster.NewCluster(ctx, cfg.ListenAddr, ob, raft.NewRaft(uint64(totalNodes)))
+	cl := cluster.NewCluster(
+		ctx,
+		cfg.ListenAddr,
+		ob,
+		raft.NewRaft(uint64(totalNodes), storage.NewStorage(cfg.ListenAddr)),
+	)
 
 	go listenLoop(ctx, cfg.ListenAddr, f, cl)
 
 	for _, addr := range cfg.PeerAddrs {
-		if cfg.ListenAddr < addr {
-			go dialWithRetry(ctx, cfg.ListenAddr, addr, f, cl)
-		}
+		go dialWithRetry(ctx, cfg.ListenAddr, normalizeAddr(addr), f, cl)
 	}
 
 	go startCLI(cl)
@@ -157,4 +161,17 @@ func registerPeer(
 	}
 
 	slog.Info("peer registered after handshake", "peer", identity)
+}
+
+func normalizeAddr(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+
+	if host == "" || host == "localhost" || host == "127.0.0.1" {
+		host = "127.0.0.1"
+	}
+
+	return net.JoinHostPort(host, port)
 }

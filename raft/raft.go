@@ -1,6 +1,8 @@
 package raft
 
 import (
+	"log/slog"
+	"raft_orderbook/storage"
 	"sync"
 )
 
@@ -15,15 +17,27 @@ type Raft struct {
 	totalNodes    uint64 // cluster size (including this own node), to calculate quorum
 	logs          []*LogEntry
 	lastLoggedIdx uint64 // separate field, because its cheaper than calculate len(logs) each time
+	storage       *storage.Storage
 
 	mu sync.RWMutex
 }
 
-func NewRaft(totalNodes uint64) *Raft {
-	return &Raft{
+func NewRaft(totalNodes uint64, s *storage.Storage) *Raft {
+	r := &Raft{
 		state:      Follower, // always start as follower
 		totalNodes: totalNodes,
+		storage:    s,
 	}
+
+	term, votedFor, err := s.Load()
+	if err != nil {
+		slog.Error("failed to load raft state, starting fresh", "error", err)
+	} else {
+		r.currentTerm = term
+		r.votedFor = votedFor
+	}
+
+	return r
 }
 
 // QuorumSize is the single source of trutrh for how many votes or acks constitute
@@ -44,6 +58,7 @@ func (r *Raft) HandleRequestVote(candidateTerm uint64, candidateID string) (gran
 		r.currentTerm = candidateTerm
 		r.votedFor = ""
 		r.state = Follower
+		r.persist() // term changed
 	}
 
 	if candidateTerm < r.currentTerm {
@@ -52,10 +67,11 @@ func (r *Raft) HandleRequestVote(candidateTerm uint64, candidateID string) (gran
 
 	if r.votedFor == "" || r.votedFor == candidateID {
 		r.votedFor = candidateID
+		r.persist() // votedFor changed, MUST happen before returning granted=true
 		return true, r.currentTerm
 	}
 
-	return false, r.currentTerm
+	return false, r.currentTerm // nothing changed
 }
 
 // HandleHeartbeat processes a heartbeat from a claimed leader. A term
@@ -69,10 +85,15 @@ func (r *Raft) HandleHeartbeat(leaderTerm uint64, leaderID string) (myTerm uint6
 		return r.currentTerm // stale leader, ignore, dont reset our timeout
 	}
 
+	termAdvanced := leaderTerm > r.currentTerm
 	r.currentTerm = leaderTerm
 	r.state = Follower
 	r.leaderID = leaderID
-	r.votedFor = "" // new term via this leader, but we track votedFor per term already above
+
+	if termAdvanced {
+		r.votedFor = ""
+		r.persist() // only saves the term already advanced
+	}
 
 	return r.currentTerm
 }
@@ -185,4 +206,13 @@ func (r *Raft) AppendAsFollower(index, term uint64, data []byte) bool {
 	}
 
 	return true
+}
+
+// persist writes currentTerm/votedFor to disk. Callers MUST already
+// hold r.mu this is a private helper, never takes the lock itself,
+// to avoid self-deadlock when called from inside a locked method.
+func (r *Raft) persist() {
+	if err := r.storage.Save(r.currentTerm, r.votedFor); err != nil {
+		slog.Error("failed to persist raft state", "error", err)
+	}
 }
