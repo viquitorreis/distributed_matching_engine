@@ -28,9 +28,9 @@ type Operation struct {
 func (ob *OrderBook) Apply(op Operation) {
 	switch op.Kind {
 	case OpAddOrder:
-		ob.addOrder(op.Order)
+		ob.AddOrder(op.Order)
 	case OpCancel:
-		ob.cancel(op.OrderID)
+		ob.Cancel(op.OrderID)
 	}
 }
 

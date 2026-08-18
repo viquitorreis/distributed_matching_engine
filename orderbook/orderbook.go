@@ -3,7 +3,6 @@ package orderbook
 import (
 	"container/list"
 	"log/slog"
-	"math/rand"
 	"sync"
 	"time"
 )
@@ -57,8 +56,8 @@ type OrderBook struct {
 func NewOrderBook(symbol string) *OrderBook {
 	return &OrderBook{
 		Symbol:    symbol,
-		bidsIndex: NewSkipList(16, Bid, 0.5, rand.New(rand.NewSource(42))),
-		asksIndex: NewSkipList(16, Ask, 0.5, rand.New(rand.NewSource(42))),
+		bidsIndex: NewSkipList(conf.maxLevel, Bid, conf.probability, conf.rng),
+		asksIndex: NewSkipList(conf.maxLevel, Ask, conf.probability, conf.rng),
 		tracker:   make(map[string]*list.Element),
 	}
 }
@@ -74,14 +73,14 @@ func NewOrder(id, userID string, side Side, price, qty int) *Order {
 	}
 }
 
-func (ob *OrderBook) addOrderLocked(o *Order) {
+func (ob *OrderBook) AddOrderLocked(o *Order) {
 	ob.mu.Lock()
 	defer ob.mu.Unlock()
-	ob.addOrder(o)
+	ob.AddOrder(o)
 }
 
 // AddOrder adds a new order at the correct book
-func (ob *OrderBook) addOrder(o *Order) {
+func (ob *OrderBook) AddOrder(o *Order) {
 	switch o.Side {
 	case Bid:
 		var level *PriceLevel
@@ -187,7 +186,7 @@ func (ob *OrderBook) Match() []Trade {
 	return res
 }
 
-func (ob *OrderBook) cancel(orderID string) bool {
+func (ob *OrderBook) Cancel(orderID string) bool {
 	ob.mu.Lock()
 	defer ob.mu.Unlock()
 

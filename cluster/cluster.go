@@ -66,8 +66,11 @@ func (c *Cluster) Bootstrap(ctx context.Context) {
 		case p := <-c.register:
 			if c.TryRegister(p.Addr, p) {
 				slog.Info("peer registered after handshake", "peer", p.Addr)
+
+				p.Send(peer.MsgSnapshotRequest, nil) // ask the new peer to catch us up with the snapshot
 			} else {
 				slog.Warn("duplicate connection to already-registered peer, closing", "peer", p.Addr)
+				ctx.Done()
 			}
 		case p := <-c.unregister:
 			c.UnregPeer(p)
@@ -95,13 +98,15 @@ func (c *Cluster) Bootstrap(ctx context.Context) {
 
 func (c *Cluster) TryRegister(identity string, p *peer.Peer) bool {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	if _, exists := c.peers[identity]; exists {
 		return false
 	}
 
 	c.peers[identity] = p
+	c.mu.Unlock()
+
+	p.Send(peer.MsgSnapshotRequest, nil) // peer just got registered, need to update from snapshots if its not
 
 	return true
 }
@@ -115,35 +120,9 @@ func (b *Cluster) UnregPeer(p *peer.Peer) {
 func (c *Cluster) handleInboundMsg(m peer.InboundMsg) {
 	switch m.Type {
 	case peer.MsgWriteProposal:
-		idx, term, op, err := decodeProposal(m.Body) // extrai ID + operação do payload
-		if err != nil {
-			slog.Error("malformed proposal", "error", err, "from", m.From.Addr)
-
-			return
-		}
-
-		if !c.raft.AppendAsFollower(idx, term, op) {
-			slog.Warn("rejected proposal from stale term", "index", idx, "term", term, "from", m.From.Addr)
-			return // dont ack stale leader
-		}
-
-		// receiving side now DOES track it, so it has the operation
-		// ready when the commit message arrives later
-		c.PendingProposals.Register(idx, op)
-
-		m.From.Send(peer.MsgWriteAck, encodeAckBody(idx)) // ack now references the real id
+		c.handleMsgProposal(m)
 
 	case peer.MsgWriteAck:
-		id := binary.BigEndian.Uint64(m.Body)
-
-		_, exists := c.PendingProposals.RecordVote(id, m.From.Addr)
-		if !exists {
-			// proposal already commited, timed out or acked
-			// something this node never proposed so we ignore, its not an errors
-			return
-		}
-
-		c.maybeCommit(id)
 
 	case peer.MsgCommit:
 		id := binary.BigEndian.Uint64(m.Body)
@@ -153,56 +132,19 @@ func (c *Cluster) handleInboundMsg(m peer.InboundMsg) {
 		m.From.MarkAlive()
 
 	case peer.MsgRequestVote:
-		candidateTerm, candidateID, err := decodeRequestVote(m.Body)
-		if err != nil {
-			slog.Error("malformed request vote", "error", err, "from", m.From.Addr)
-
-			return
-		}
-
-		granted, myTerm := c.raft.HandleRequestVote(candidateTerm, candidateID)
-		slog.Info("vote decision", "candidate", candidateID, "term", candidateTerm, "granted", granted)
-		m.From.Send(peer.MsgVoteGranted, encodeVoteResponse(myTerm, granted))
+		c.handleMsgRequestVote(m)
 
 	case peer.MsgLeaderHeartbeat:
-		term, leaderID, err := decodeLeaderHeartbeat(m.Body)
-		if err != nil {
-			slog.Error("malformed leader heartbeat", "error", err, "from", m.From.Addr)
-
-			return
-		}
-
-		myTerm := c.raft.HandleHeartbeat(term, leaderID)
-		if myTerm <= term { // accepted (not stale)
-			c.resetElectionTimer()
-		}
+		c.handleMsgLeaderHeartBeat(m)
 
 	case peer.MsgVoteGranted:
-		term, granted, err := decodeVoteResponse(m.Body)
-		if err != nil {
-			slog.Error("malformed vote response", "error", err, "from", m.From.Addr)
+		c.handleMsgVoteGranted(m)
 
-			return
-		}
+	case peer.MsgSnapshotRequest:
+		c.handleMsgSnapshotRequest(m)
 
-		if !granted {
-			if term > c.raft.CurrentTerm() {
-				c.raft.StepDown(term) // someone is ahead of this peer, yield
-			}
-
-			return
-		}
-
-		c.electionMu.Lock()
-		c.votesReceived[m.From.Addr] = struct{}{}
-		votes := len(c.votesReceived)
-		c.electionMu.Unlock()
-
-		if votes >= int(c.raft.QuorumSize()) && !c.raft.IsLeader() {
-			c.raft.BecomeLeader()
-			slog.Info("became leader", "term", c.raft.CurrentTerm())
-			c.broadcastLeaderHeartbeat() // assert authority immediately, don't wait for the next tick
-		}
+	case peer.MsgSnapshotResponse:
+		c.handleMsgSnapshotResponse(m)
 
 	case peer.MsgHello:
 		// handshake

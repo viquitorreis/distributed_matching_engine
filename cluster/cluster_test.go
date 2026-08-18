@@ -131,3 +131,63 @@ func waitForLeader(t *testing.T, clusters []*cluster.Cluster, timeout time.Durat
 	t.Fatal("no leader elected within timeout")
 	return -1
 }
+
+func mustEncodeAddOrder(t *testing.T, id string, side orderbook.Side, price, qty int) []byte {
+	t.Helper()
+	order := orderbook.NewOrder(id, "test-user", side, price, qty)
+	op := orderbook.Operation{Kind: orderbook.OpAddOrder, Order: order}
+	payload, err := orderbook.EncodeOperation(op)
+	if err != nil {
+		t.Fatalf("failed to encode operation: %v", err)
+	}
+	return payload
+}
+
+func TestSnapshotCatchup_EndToEnd(t *testing.T) {
+	parentCtx := context.Background()
+	f := framing.NewFraming(4)
+
+	// source node: already has state
+	ctxSrc, cancelSrc := context.WithCancel(parentCtx)
+	defer cancelSrc()
+	srcOB := orderbook.NewOrderBook("BTC-USD")
+	srcSt := &storage.Storage{FilePath: t.TempDir() + "/src.json"}
+	srcRaft := raft.NewRaft(2, srcSt)
+	srcCluster := cluster.NewCluster(ctxSrc, "node-src", srcOB, srcRaft)
+
+	// dest node: starts empty, behind
+	ctxDst, cancelDst := context.WithCancel(parentCtx)
+	defer cancelDst()
+	dstOB := orderbook.NewOrderBook("BTC-USD")
+	dstSt := &storage.Storage{FilePath: t.TempDir() + "/dst.json"}
+	dstRaft := raft.NewRaft(2, dstSt)
+	dstCluster := cluster.NewCluster(ctxDst, "node-dst", dstOB, dstRaft)
+
+	// give the source node some real state, and advance its own log
+	// index directly through the leader path, so LastLogIndex is
+	// meaningfully nonzero when the snapshot goes out
+	srcRaft.BecomeCandidate("node-src")
+	srcRaft.BecomeLeader()
+	srcCluster.Propose(mustEncodeAddOrder(t, "o1", orderbook.Bid, 100, 10))
+
+	connectPeers(t, ctxSrc, srcCluster, "node-src", ctxDst, dstCluster, "node-dst", f)
+
+	// the connection alone should trigger dst's snapshot request per
+	// the join flow wait for it to land
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if dstRaft.LastLogIndex() > 0 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if got := dstRaft.LastLogIndex(); got == 0 {
+		t.Fatal("destination never caught up — LastLogIndex still 0")
+	}
+
+	orders := dstOB.AllOrders()
+	if len(orders) != 1 || orders[0].ID != "o1" {
+		t.Fatalf("expected destination orderbook to contain order o1 after catch-up, got %+v", orders)
+	}
+}

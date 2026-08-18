@@ -1,8 +1,9 @@
-package orderbook
+package orderbook_test
 
 import (
 	"fmt"
 	"math/rand"
+	"raft_orderbook/orderbook"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -19,13 +20,13 @@ func TestLoad(t *testing.T) {
 
 	for _, workers := range concurrencyLevels {
 		t.Run(fmt.Sprintf("workers_%d", workers), func(t *testing.T) {
-			ob := NewOrderBook("BTC-USD")
+			ob := orderbook.NewOrderBook("BTC-USD")
 
 			// pre populate with orders to have something to cancel from the start
 			var idCounter int64
 			for i := 0; i < 1000; i++ {
 				id := fmt.Sprintf("seed-%d", atomic.AddInt64(&idCounter, 1))
-				ob.addOrder(NewOrder(id, "user", Bid, 100+rand.Intn(50), 1))
+				ob.AddOrder(orderbook.NewOrder(id, "user", orderbook.Bid, 100+rand.Intn(50), 1))
 			}
 
 			var wg sync.WaitGroup
@@ -47,14 +48,14 @@ func TestLoad(t *testing.T) {
 						switch {
 						case op < 0.70: // cancel
 							id := fmt.Sprintf("seed-%d", r.Intn(1000)+1)
-							ob.cancel(id)
+							ob.Cancel(id)
 						case op < 0.90: // add
 							id := fmt.Sprintf("w-%d", atomic.AddInt64(&idCounter, 1))
-							side := Bid
+							side := orderbook.Bid
 							if r.Intn(2) == 0 {
-								side = Ask
+								side = orderbook.Ask
 							}
-							ob.addOrder(NewOrder(id, "user", side, 100+r.Intn(50), 1))
+							ob.AddOrder(orderbook.NewOrder(id, "user", side, 100+r.Intn(50), 1))
 						default: // match
 							ob.Match()
 						}

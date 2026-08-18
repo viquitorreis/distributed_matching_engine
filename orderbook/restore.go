@@ -5,11 +5,10 @@ import (
 	"container/list"
 	"encoding/gob"
 	"fmt"
-	"math/rand"
 )
 
 // Restore replaces this order books entire state with the given
-// snapshot. Meant for a node catching up after rejoining — wipes
+// snapshot. Meant for a node catching up after rejoining wipes
 // whatever local state exists first, since the snapshot is the source
 // of truth from a peer that's ahead.
 func (ob *OrderBook) Restore(data []byte) error {
@@ -22,14 +21,14 @@ func (ob *OrderBook) Restore(data []byte) error {
 	defer ob.mu.Unlock()
 
 	// wipe current state same fresh structures NewOrderBook would create
-	ob.bidsIndex = NewSkipList(16, Bid, 0.5, rand.New(rand.NewSource(42)))
-	ob.asksIndex = NewSkipList(16, Ask, 0.5, rand.New(rand.NewSource(42)))
+	ob.bidsIndex = NewSkipList(conf.maxLevel, Bid, conf.probability, conf.rng)
+	ob.asksIndex = NewSkipList(conf.maxLevel, Ask, conf.probability, conf.rng)
 	ob.tracker = make(map[string]*list.Element)
 
 	for _, o := range orders {
 		full := NewOrder(o.ID, "", o.Side, o.Price, o.Quantity) // UserID not in snapshot today, see note below
 		full.Timestamp = 0                                      // ordering within a price level is lost across snapshot, todo: documented limitation
-		ob.addOrder(full)
+		ob.AddOrder(full)
 	}
 
 	return nil

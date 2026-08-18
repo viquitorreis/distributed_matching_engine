@@ -5,8 +5,6 @@ import (
 	"math/rand"
 )
 
-const MaxLevel = 16
-
 type SkipListNode struct {
 	score   int
 	value   *PriceLevel     // stores a price + list of orders

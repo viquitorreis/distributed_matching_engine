@@ -1,17 +1,19 @@
-package orderbook
+package orderbook_test
 
 import (
 	"fmt"
 	"sync"
 	"testing"
 
+	"raft_orderbook/orderbook"
+
 	"github.com/stretchr/testify/assert"
 )
 
 func TestAddAndMatch(t *testing.T) {
-	ob := NewOrderBook("BTC-USD")
-	ob.addOrder(NewOrder("b1", "alice", Bid, 103, 5))
-	ob.addOrder(NewOrder("a1", "bob", Ask, 103, 3))
+	ob := orderbook.NewOrderBook("BTC-USD")
+	ob.AddOrder(orderbook.NewOrder("b1", "alice", orderbook.Bid, 103, 5))
+	ob.AddOrder(orderbook.NewOrder("a1", "bob", orderbook.Ask, 103, 3))
 
 	trades := ob.Match()
 	assert.Len(t, trades, 1)
@@ -21,28 +23,28 @@ func TestAddAndMatch(t *testing.T) {
 }
 
 func TestNoMatch(t *testing.T) {
-	ob := NewOrderBook("BTC-USD")
-	ob.addOrder(NewOrder("b1", "alice", Bid, 100, 5))
-	ob.addOrder(NewOrder("a1", "bob", Ask, 105, 3))
+	ob := orderbook.NewOrderBook("BTC-USD")
+	ob.AddOrder(orderbook.NewOrder("b1", "alice", orderbook.Bid, 100, 5))
+	ob.AddOrder(orderbook.NewOrder("a1", "bob", orderbook.Ask, 105, 3))
 
 	trades := ob.Match()
 	assert.Empty(t, trades)
 }
 
 func TestCancel(t *testing.T) {
-	ob := NewOrderBook("BTC-USD")
-	ob.addOrder(NewOrder("b1", "alice", Bid, 100, 5))
-	assert.True(t, ob.cancel("b1"))
+	ob := orderbook.NewOrderBook("BTC-USD")
+	ob.AddOrder(orderbook.NewOrder("b1", "alice", orderbook.Bid, 100, 5))
+	assert.True(t, ob.Cancel("b1"))
 	assert.Equal(t, 0, ob.BidDepth())
-	assert.False(t, ob.cancel("b1")) // already removed
+	assert.False(t, ob.Cancel("b1")) // already removed
 }
 
 func TestPriceTimePriority(t *testing.T) {
-	ob := NewOrderBook("BTC-USD")
+	ob := orderbook.NewOrderBook("BTC-USD")
 	// both bids have the same price, but b1 arrived first
-	ob.addOrder(NewOrder("b1", "alice", Bid, 103, 2))
-	ob.addOrder(NewOrder("b2", "bob", Bid, 103, 2))
-	ob.addOrder(NewOrder("a1", "carol", Ask, 103, 2))
+	ob.AddOrder(orderbook.NewOrder("b1", "alice", orderbook.Bid, 103, 2))
+	ob.AddOrder(orderbook.NewOrder("b2", "bob", orderbook.Bid, 103, 2))
+	ob.AddOrder(orderbook.NewOrder("a1", "carol", orderbook.Ask, 103, 2))
 
 	trades := ob.Match()
 	assert.Len(t, trades, 1)
@@ -50,14 +52,14 @@ func TestPriceTimePriority(t *testing.T) {
 }
 
 func TestConcurrentaddOrders(t *testing.T) {
-	ob := NewOrderBook("BTC-USD")
+	ob := orderbook.NewOrderBook("BTC-USD")
 	var wg sync.WaitGroup
 	for i := 0; i < 100; i++ {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			ob.addOrder(NewOrder(
-				fmt.Sprintf("b%d", n), "user", Bid, 100+n, 1,
+			ob.AddOrder(orderbook.NewOrder(
+				fmt.Sprintf("b%d", n), "user", orderbook.Bid, 100+n, 1,
 			))
 		}(i)
 	}
@@ -78,17 +80,17 @@ func BenchmarkCancelMiddleOfLevel(b *testing.B) {
 
 			for i := 0; i < b.N; i++ {
 				b.StopTimer()
-				ob := NewOrderBook("BTC-USD")
+				ob := orderbook.NewOrderBook("BTC-USD")
 				ids := make([]string, n)
 				for j := 0; j < n; j++ {
 					id := fmt.Sprintf("o%d", j)
 					ids[j] = id
-					ob.addOrder(NewOrder(id, "user", Bid, 100, 1))
+					ob.AddOrder(orderbook.NewOrder(id, "user", orderbook.Bid, 100, 1))
 				}
 				middleID := ids[n/2]
 				b.StartTimer()
 
-				ob.cancel(middleID)
+				ob.Cancel(middleID)
 			}
 		})
 	}
@@ -107,17 +109,17 @@ func BenchmarkCancelManyDistinctLevels(b *testing.B) {
 
 			for i := 0; i < b.N; i++ {
 				b.StopTimer()
-				ob := NewOrderBook("BTC-USD")
+				ob := orderbook.NewOrderBook("BTC-USD")
 				ids := make([]string, n)
 				for j := 0; j < n; j++ {
 					id := fmt.Sprintf("o%d", j)
 					ids[j] = id
-					ob.addOrder(NewOrder(id, "user", Bid, 100+j, 1))
+					ob.AddOrder(orderbook.NewOrder(id, "user", orderbook.Bid, 100+j, 1))
 				}
 				b.StartTimer()
 
 				for _, id := range ids {
-					ob.cancel(id)
+					ob.Cancel(id)
 				}
 			}
 		})

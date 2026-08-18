@@ -11,6 +11,9 @@ import (
 	"time"
 )
 
+// a Peer represents a network peer or node, holding the TCP connection/
+// It only transport bytes, read frames, decode type+body, delivers to Cluster via inbound channel
+// and writes what Cluster sends, without knowing the content
 type Peer struct {
 	Addr    string
 	conn    net.Conn

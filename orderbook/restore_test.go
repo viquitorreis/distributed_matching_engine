@@ -10,9 +10,9 @@ func TestSnapshotRestore_RoundTrip(t *testing.T) {
 	// populate with a few orders on both sides, deliberately not
 	// crossing (different prices), so nothing matches away before
 	// the snapshot is taken
-	ob.addOrder(NewOrder("bid-1", "user-a", Bid, 100, 10))
-	ob.addOrder(NewOrder("bid-2", "user-b", Bid, 95, 5))
-	ob.addOrder(NewOrder("ask-1", "user-c", Ask, 110, 7))
+	ob.AddOrder(NewOrder("bid-1", "user-a", Bid, 100, 10))
+	ob.AddOrder(NewOrder("bid-2", "user-b", Bid, 95, 5))
+	ob.AddOrder(NewOrder("ask-1", "user-c", Ask, 110, 7))
 
 	snap, err := ob.Snapshot()
 	if err != nil {
@@ -52,7 +52,7 @@ func TestSnapshotRestore_RoundTrip(t *testing.T) {
 
 func TestRestore_WipesExistingState(t *testing.T) {
 	ob := NewOrderBook("BTC-USD")
-	ob.addOrder(NewOrder("stale-order", "user-x", Bid, 50, 3))
+	ob.AddOrder(NewOrder("stale-order", "user-x", Bid, 50, 3))
 
 	// snapshot from a DIFFERENT, empty book restoring this should
 	// wipe "stale-order", not merge with it

@@ -216,3 +216,23 @@ func (r *Raft) persist() {
 		slog.Error("failed to persist raft state", "error", err)
 	}
 }
+
+func (r *Raft) LastLogIndex() uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.lastLoggedIdx
+}
+
+// FastForward advances the Raft log pointer to reflect a snapshot
+// that has already been applied elsewhere (the orderbook, in this system).
+// It never moves the pointer backward, a stale or duplicate snapshot response arriving late
+// must not undo progress already made
+func (r *Raft) FastForward(index uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if index > r.lastLoggedIdx {
+		r.lastLoggedIdx = index
+	}
+}

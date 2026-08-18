@@ -7,11 +7,6 @@ import (
 	"fmt"
 )
 
-type RequestVoteBody struct {
-	Term        uint64
-	CandidateID string
-}
-
 func encodeRequestVote(term uint64, candidateID string) ([]byte, error) {
 	var buf bytes.Buffer
 
@@ -32,11 +27,6 @@ func decodeRequestVote(body []byte) (term uint64, candidateID string, err error)
 	return rv.Term, rv.CandidateID, nil
 }
 
-type VoteResponseBody struct {
-	Term    uint64
-	Granted bool
-}
-
 func encodeVoteResponse(term uint64, granted bool) []byte {
 	var buf bytes.Buffer
 	// gob encode of a simple struct never fails on valid input types,
@@ -55,11 +45,6 @@ func decodeVoteResponse(body []byte) (term uint64, granted bool, err error) {
 	}
 
 	return vr.Term, vr.Granted, nil
-}
-
-type LeaderHeartbeatBody struct {
-	Term     uint64
-	LeaderID string
 }
 
 func encodeLeaderHeartbeat(term uint64, leaderID string) ([]byte, error) {
@@ -86,4 +71,28 @@ func encodeAckBody(idx uint64) []byte {
 	buf := make([]byte, 8) // uint64 have 64 bits / 8 = 8 bytes
 	binary.BigEndian.PutUint64(buf, idx)
 	return buf
+}
+
+func encodeSnapshotResponse(snap []byte, lastIdx uint64) ([]byte, error) {
+	var buf bytes.Buffer
+
+	if err := gob.NewEncoder(&buf).Encode(SnapshotResponseBody{
+		LastIncludedIndex: lastIdx,
+		Data:              snap,
+	}); err != nil {
+		return nil, fmt.Errorf("encoder snapshot response: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
+func encodeSnapshotRequest(snap []byte, lastIdx uint64) []byte {
+	var buf bytes.Buffer
+
+	gob.NewEncoder(&buf).Encode(SnapshotResponseBody{
+		LastIncludedIndex: lastIdx,
+		Data:              snap,
+	})
+
+	return buf.Bytes()
 }
