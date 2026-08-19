@@ -3,6 +3,7 @@ package cluster_test
 import (
 	"context"
 	"net"
+	"os"
 	"testing"
 	"time"
 
@@ -62,6 +63,11 @@ func TestRaftFailover_NewLeaderElectedAfterLeaderDies(t *testing.T) {
 	cancels := make([]context.CancelFunc, 3)
 	clusters := make([]*cluster.Cluster, 3)
 
+	storageDir := os.Getenv("STORAGE_DIR")
+	if storageDir == "" {
+		storageDir = "."
+	}
+
 	for i, addr := range addrs {
 		ctx, cancel := context.WithCancel(parentCtx)
 		ctxs[i] = ctx
@@ -71,7 +77,10 @@ func TestRaftFailover_NewLeaderElectedAfterLeaderDies(t *testing.T) {
 			ctx,
 			addr,
 			ob,
-			raft.NewRaft(uint64(len(addrs)), storage.NewStorage(addr)),
+			raft.NewRaft(
+				uint64(len(addrs)),
+				storage.NewStorage(storageDir, addr),
+			),
 		)
 	}
 	defer func() {

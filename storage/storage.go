@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -11,11 +12,11 @@ type Storage struct {
 	FilePath string
 }
 
-func NewStorage(peerAddr string) *Storage {
+func NewStorage(dir, peerAddr string) *Storage {
 	// ':' is invalid in filenames on some platforms
 	safe := strings.ReplaceAll(peerAddr, ":", "-")
 	return &Storage{
-		FilePath: fmt.Sprintf("raft-state-%s.json", safe),
+		FilePath: filepath.Join(dir, fmt.Sprintf("raft-state-%s.json", safe)),
 	}
 }
 

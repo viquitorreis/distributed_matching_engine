@@ -17,51 +17,41 @@ import (
 	"time"
 )
 
-// fixed config topology: own address + peers addresses
-type Config struct {
-	ListenAddr string
-	PeerAddrs  []string
-}
-
 func main() {
-	// run as i.e.:
-	// LISTEN_ADDR=localhost:9001 go run ./cmd/node localhost:9002 localhost:9003
-
-	// # terminal 2
-	// LISTEN_ADDR=localhost:9002 go run ./cmd/node localhost:9001 localhost:9003
-
-	// # terminal 3
-	// LISTEN_ADDR=localhost:9003 go run ./cmd/node localhost:9001 localhost:9002
-
-	// # then on one terminal: "order bid 100 10" and "order ask 100 10" on another one
-	// to cancel just "cancel <order_uuid>""
-	cfg := Config{
-		ListenAddr: normalizeAddr(os.Getenv("LISTEN_ADDR")), // ex: ":9001"
-		PeerAddrs:  os.Args[1:],                             // ex: :9002 :9003
-	}
+	cfg := resolveConfig()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	storageDir := os.Getenv("STORAGE_DIR")
+	if storageDir == "" {
+		storageDir = "."
+	}
 
 	f := framing.NewFraming(4)
 	ob := orderbook.NewOrderBook("BTC-USD")
 	totalNodes := len(cfg.PeerAddrs) + 1
 	cl := cluster.NewCluster(
 		ctx,
-		cfg.ListenAddr,
+		cfg.AdvertiseAddr,
 		ob,
-		raft.NewRaft(uint64(totalNodes), storage.NewStorage(cfg.ListenAddr)),
+		raft.NewRaft(
+			uint64(totalNodes),
+			storage.NewStorage(storageDir, cfg.AdvertiseAddr),
+		),
 	)
 
-	go listenLoop(ctx, cfg.ListenAddr, f, cl)
+	go listenLoop(ctx, cfg.BindAddr, cfg.AdvertiseAddr, f, cl)
 
 	for _, addr := range cfg.PeerAddrs {
-		go dialWithRetry(ctx, cfg.ListenAddr, normalizeAddr(addr), f, cl)
+		if cfg.AdvertiseAddr < addr {
+			go dialWithRetry(ctx, cfg.AdvertiseAddr, normalizeAddr(addr), f, cl)
+		}
 	}
 
 	go startCLI(cl)
 
-	slog.Info("node is up and running", "port", cfg.ListenAddr)
+	slog.Info("node is up and running", "port", cfg.AdvertiseAddr)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -72,8 +62,8 @@ func main() {
 }
 
 // listenLoop accepts inbound connections from others on the cluster
-func listenLoop(ctx context.Context, ownAddr string, f *framing.Framing, cl *cluster.Cluster) {
-	ln, err := net.Listen("tcp", ownAddr)
+func listenLoop(ctx context.Context, bindAddr, advertiseAddr string, f *framing.Framing, cl *cluster.Cluster) {
+	ln, err := net.Listen("tcp", bindAddr)
 	if err != nil {
 		log.Fatalf("err starting listener: %v", err)
 	}
@@ -100,7 +90,7 @@ func listenLoop(ctx context.Context, ownAddr string, f *framing.Framing, cl *clu
 			tc.SetNoDelay(true)
 		}
 
-		registerPeer(ctx, ownAddr, conn, f, cl)
+		registerPeer(ctx, advertiseAddr, conn, f, cl)
 	}
 }
 

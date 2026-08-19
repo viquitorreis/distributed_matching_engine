@@ -3,6 +3,7 @@ package peer_test
 import (
 	"context"
 	"net"
+	"os"
 	"raft_orderbook/cluster"
 	"raft_orderbook/framing"
 	"raft_orderbook/orderbook"
@@ -68,11 +69,19 @@ func TestCluster_RejectsSecondConnectionSameIdentity(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	storageDir := os.Getenv("STORAGE_DIR")
+	if storageDir == "" {
+		storageDir = "."
+	}
+
 	cl := cluster.NewCluster(
 		ctx,
 		"localhost:9002",
 		orderbook.NewOrderBook("BTC-USD"),
-		raft.NewRaft(uint64(2), storage.NewStorage("9002")),
+		raft.NewRaft(
+			uint64(2),
+			storage.NewStorage(storageDir, "9002"),
+		),
 	)
 	f := framing.NewFraming(4)
 

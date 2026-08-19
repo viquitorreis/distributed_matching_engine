@@ -1,14 +1,54 @@
 # Distributed Matching Engine
 
-A low-latency order book and matching engine in Go, evolving from a
-single node implementation into a distributed system with quorum based
-replication and failover.
+A low-latency order book and matching engine in Go, a multi-node distributed
+system with Raft-based leader election, quorum-committed log replication,
+snapshot catch-up, and tested failover.
 
-**State as of 21/jul:** single-node, skip list + doubly linked list price levels
-(O(log n) cancel, O(1) order removal within a level). See [BENCHMARKS.md]
-for a full comparison against an earlier heap-based implementation.
+## Local Running
 
-**Current state as of 14/ago**: distributed cluster over the original single-node engine, order book unchanged internally (skip list + doubly linked list price levels, O(log n) cancel, O(1) order removal within a level, see [BENCHMARKS.md] for the heap-based comparison), now wrapped in an Operation/Apply layer so commands replicate deterministically across nodes. Replication runs over a hand-rolled TCP protocol (length-prefix framing, one goroutine per peer for reads/writes, identity via handshake) with quorum-based write commits and Raft-based leader election (Follower/Candidate/Leader, randomized election timeout, term-based voting). Validated manually across 3 real nodes: cross-node order matching converges correctly, and a new leader is elected with a higher term after killing the current one. Known gaps: no total ordering across concurrent proposals yet (any node can still propose, not just the leader), Raft state is in-memory only (lost on restart), and no catch-up mechanism for a node rejoining after downtime.
+1. Create the cluster
+
+```bash
+kind create cluster --name matching-engine
+```
+
+2. Build the image
+
+```bash
+docker build -t engine:local -f infra/docker/Dockerfile .
+```
+
+3. Carry the image to kind
+
+```bash
+kind load docker-image engine:local --name matching-engine
+```
+
+4. Apply the manifesto:
+
+```bash
+kubectl apply -f infra/k8s/engine-statefulset.yaml
+```
+
+5. Observe pods getting up
+
+```bash
+kubectl get pods -w
+```
+
+6. Watch logs:
+
+```bash
+kubectl logs engine-0
+kubectl logs engine-1
+kubectl logs engine-2
+```
+
+- Test failover
+
+```bash
+kubectl attach -it engine-0
+```
 
 ## Architecture
 
